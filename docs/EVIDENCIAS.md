@@ -1,7 +1,23 @@
 # Registro das evidências reais
 
-Este arquivo é um formulário de coleta, não uma declaração de execução.
-Preencha após executar os workflows e acrescente as capturas nesta pasta.
+## Evidências já verificadas
+
+- Repositório: https://github.com/GustavoHMFilho/devsecops-simples
+- PR da demonstração: https://github.com/GustavoHMFilho/devsecops-simples/pull/1
+- Execução reprovada por CVE: https://github.com/GustavoHMFilho/devsecops-simples/actions/runs/40610966069
+- Commit vulnerável: `3b603313ae5b421b3875c87bf92691789eeb4fef`.
+- Correção: commit `c0ff23d`, cross-spawn atualizado para 7.0.6 no mesmo PR.
+- Resultado consultado na API do PR antes da correção: `mergeStateStatus: BLOCKED`.
+- Relatório real: [dependencies.json](evidencias/falha/dependencies.json).
+- Trecho extraído do relatório: [cve-resumo.json](evidencias/falha/cve-resumo.json).
+- Achado: CVE-2024-21538, cross-spawn 7.0.3, HIGH, FixedVersion `7.0.5, 6.0.6`.
+- Build/testes e Gitleaks passaram no GitHub. Trivy reprovou a dependência e a imagem vulneráveis.
+- Testes locais: 6 aprovados; cobertura de linhas, branches e funções de `src/app.js`: 100%.
+
+O restante da tabela é um formulário de coleta. Ainda é necessário concluir
+o SonarCloud no GitHub Actions, registrar a execução aprovada e incluir as
+capturas exigidas. A captura automatizada do Edge foi impedida pelo controle
+de navegação do ambiente; o relatório JSON não é uma captura de tela.
 
 | Item | Link/arquivo/resultado |
 |---|---|
