@@ -3,11 +3,15 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "start": "node src/server.js",
     "test": "node --test --experimental-test-coverage --test-coverage-include=src/app.js --test-reporter=spec --test-reporter=lcov --test-reporter-destination=stdout --test-reporter-destination=lcov.info",
     "build": "node --check src/app.js && node --check src/server.js"
   },
-  "dependencies": { "cross-spawn": "7.0.6" }
+  "dependencies": {
+    "cross-spawn": "7.0.3"
+  }
 }
