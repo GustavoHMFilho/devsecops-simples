@@ -4,10 +4,9 @@ API simples em Node.js com build, testes, Docker, Gitleaks, SonarCloud,
 Trivy e Syft. Como não havia aplicação anterior disponível, esta é a aplicação
 de referência para executar a atividade desde o início.
 
-**Estado da entrega:** implementação preparada e testes locais executados.
-A execução no GitHub, configuração do SonarCloud, proteção da main e capturas
-precisam ser concluídas na conta do aluno. Nenhuma captura ou execução remota
-é apresentada como realizada sem comprovação.
+**Execução real aprovada:** https://github.com/GustavoHMFilho/devsecops-simples/actions/runs/40611680339
+
+Repositório, SonarCloud e proteção da main configurados. Veja docs/EVIDENCIAS.md para relatórios, SBOM, capturas e a limitação da captura do botão de merge.
 
 ## 1. Rodar localmente
 
@@ -199,3 +198,4 @@ arquivos de configuração sozinha não atende ao requisito de evidências.
 - [SonarCloud com GitHub Actions](https://docs.sonarsource.com/sonarqube-cloud/analyzing-source-code/ci-based-analysis/github-actions-for-sonarcloud/)
 - [Syft no GitHub Actions](https://github.com/anchore/sbom-action)
 - [Gitleaks CLI](https://github.com/gitleaks/gitleaks)
+
