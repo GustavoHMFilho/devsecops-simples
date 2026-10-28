@@ -1,18 +1,19 @@
-# Trabalho prático: pipeline DevSecOps
+# Pipeline DevSecOps com GitHub Actions
 
-API simples em Node.js com build, testes, Docker, Gitleaks, SonarCloud,
-Trivy e Syft. Como não havia aplicação anterior disponível, esta é a aplicação
-de referência para executar a atividade desde o início.
+**Aluno:** Gustavo Henrique Moraes Filho  
+**Matrícula:** 202310429  
+**Disciplina:** DevOps - UFLA
 
-**Execução real aprovada:** https://github.com/GustavoHMFilho/devsecops-simples/actions/runs/40611680339
+## Aplicação
 
-Repositório, SonarCloud e proteção da main configurados. Veja docs/EVIDENCIAS.md para relatórios, SBOM, capturas e a limitação da captura do botão de merge.
+API em Node.js com três rotas: `GET /`, `GET /health` e `GET /runtime`.
+A rota `/runtime` utiliza cross-spawn para consultar a versão do Node com
+executável e argumentos fixos. O projeto integra build, testes, análise de
+segurança, geração de SBOM e publicação de imagem Docker no GHCR.
 
-## 1. Rodar localmente
+## Execução local
 
-Requisitos locais: Node.js 22.17+ (24 recomendado), Git e GitHub CLI.
-Docker Desktop é necessário apenas para executar a imagem localmente;
-o GitHub Actions já fornece Docker.
+Com Node.js 24 instalado:
 
 ```powershell
 npm ci --ignore-scripts
@@ -21,181 +22,95 @@ npm test
 npm start
 ```
 
-Rotas: `GET /`, `GET /health` e `GET /runtime`. Porta 3000.
-A dependência cross-spawn é usada em `/runtime` para consultar a versão
-do Node com executável e argumentos fixos, sem executar comandos do usuário.
-Os testes cobrem sucesso, rota inexistente, método inválido e falha do runtime.
-`npm test` produz `lcov.info` para o SonarCloud.
+A aplicação atende na porta 3000. Os seis testes cobrem respostas válidas,
+rota inexistente, método inválido e indisponibilidade do runtime. A cobertura
+de linhas, branches e funções de `src/app.js` foi de 100%. O relatório LCOV
+é enviado ao SonarCloud.
 
 ```powershell
 docker build -t devsecops-local .
 docker run --rm -p 3000:3000 devsecops-local
 ```
 
-## 2. Criar o repositório
+## Pipeline e critérios de bloqueio
 
-Extraia o ZIP e abra o PowerShell dentro desta pasta.
-Autentique pelo navegador; nunca coloque tokens no código ou no chat.
+O workflow [devsecops.yml](.github/workflows/devsecops.yml) executa na abertura,
+reabertura e atualização dos PRs para `main`, em pushes para `main` e por
+acionamento manual.
 
-```powershell
-gh auth login --hostname github.com --git-protocol https --web --scopes workflow
-git init -b main
-git add .
-git commit -m "feat: aplicacao e pipeline DevSecOps"
-gh repo create devsecops-simples --public --source=. --remote=origin --push
-```
-
-Se o Git pedir identidade, configure `git config user.name` e
-`git config user.email` com seus próprios dados e repita o commit.
-O primeiro pipeline falhará no SonarCloud até a próxima etapa ser concluída;
-isso demonstra configuração ausente, não a CVE exigida na atividade.
-
-## 3. Configurar o SonarCloud (SonarQube Cloud)
-
-1. Entre em https://sonarcloud.io com GitHub e importe o repositório público.
-2. Selecione análise por GitHub Actions/CI. Desative a análise automática
-   do SonarCloud para não disputar com a análise enviada pelo workflow.
-3. Copie a chave da organização e a chave do projeto exibidas pelo serviço.
-4. Em GitHub > Settings > Secrets and variables > Actions, crie:
-   - Secret `SONAR_TOKEN`: token gerado na sua conta SonarCloud.
-   - Variable `SONAR_ORGANIZATION`: chave exata da organização.
-   - Variable `SONAR_PROJECT_KEY`: chave exata do projeto.
-5. Em SonarCloud > Project > Quality Gate, associe o gate **Sonar way**.
-   Confira os critérios de código novo: nenhuma issue nova, 100% dos
-   Security Hotspots revisados, cobertura de pelo menos 80% e duplicação
-   de no máximo 3%. Se a interface usar ratings, exija A em segurança,
-   confiabilidade e manutenibilidade. Guarde uma captura dos critérios.
-6. Em New Code, configure a referência da branch principal, por exemplo
-   Previous version. Nos PRs, o código novo é a diferença para a branch alvo.
-7. Confira em https://docs.sonarsource.com/sonarqube-cloud/ se o plano
-   escolhido permite análise de PR para seu projeto. Se houver restrição,
-   utilize um plano educacional ou habilitação compatível; não pule o gate.
-8. GitHub > Actions > DevSecOps > Run workflow > main. Aguarde a análise
-   inicial da main aprovar antes de criar a branch de demonstração.
-
-O scanner usa `sonar.qualitygate.wait=true`: aguarda o resultado e retorna
-falha se o gate reprovar ou se a espera exceder 300 segundos. A ausência de
-token ou de identificação do projeto também falha; não existe bypass.
-Se o projeto pequeno receber a regra de isenção de cobertura/duplicação para
-menos de 20 linhas novas, registre essa regra na evidência do Quality Gate;
-ela não dispensa as condições de segurança e revisão de hotspots.
-
-## 4. Verificações e regras de bloqueio
-
-| Check | O que verifica | Quando bloqueia |
+| Check | Verificação | Critério de falha |
 |---|---|---|
-| Build e testes | Sintaxe, testes e cobertura da aplicação | Build ou teste falha |
-| Gitleaks | Todo o histórico Git disponível, com `fetch-depth: 0` e `--all` | Segredo detectado, exit code 1 |
-| SonarCloud Quality Gate | Análise estática e gate de código novo | Gate reprovado, indisponível ou sem configuração |
-| Trivy dependencias | Dependências no package-lock.json | HIGH/CRITICAL com correção disponível |
-| Docker Trivy e SBOM | Build, inventário Syft e vulnerabilidades da imagem | HIGH/CRITICAL com correção; falha de build/SBOM |
-| Seguranca obrigatoria | Resultado de todos os checks anteriores | Qualquer resultado diferente de success, inclusive skipped |
+| Build e testes | Sintaxe, testes e cobertura | Falha de build ou teste |
+| Gitleaks | Histórico Git completo, com fetch-depth 0 e --all | Detecção de segredo |
+| SonarCloud Quality Gate | SAST e Quality Gate Sonar way sobre código novo | Gate reprovado ou análise indisponível |
+| Trivy dependencias | Dependências registradas no lockfile | HIGH/CRITICAL com correção disponível |
+| Docker Trivy e SBOM | Imagem construída, vulnerabilidades e inventário Syft | HIGH/CRITICAL corrigível ou falha na geração do SBOM |
+| Seguranca obrigatoria | Resultados dos checks anteriores | Qualquer resultado diferente de success |
 
-Gitleaks usa a CLI oficial em container, sem depender de licença de uma Action.
-Os resultados têm valores de segredos ocultados com `--redact`.
-Não são usadas credenciais reais nos testes. Para uma demonstração opcional,
-use somente um segredo fictício em repositório temporário, pois remover o
-arquivo em um commit posterior não elimina o segredo do histórico.
+O Gitleaks retorna código 1 ao detectar segredos e oculta os valores dos
+achados com `--redact`. Nenhuma credencial real foi utilizada nos testes.
 
-Cada análise Trivy gera primeiro um relatório JSON de todas as severidades,
-incluindo LOW e MEDIUM e vulnerabilidades sem correção. Essa etapa usa
-`--exit-code 0` exclusivamente para registrar o relatório. A etapa seguinte
-aplica o bloqueio real com `--severity HIGH,CRITICAL --ignore-unfixed
---exit-code 1`. LOW/MEDIUM e achados sem correção permanecem visíveis no JSON,
-mas não bloqueiam. Erros operacionais do scanner também falham o job.
+O SonarCloud utiliza a organização `gustavohmfilho` e o projeto
+`GustavoHMFilho_devsecops-simples`. A análise automática do serviço está
+desativada para utilizar o GitHub Actions. O token fica no secret
+`SONAR_TOKEN`. A opção `sonar.qualitygate.wait=true` faz o scanner aguardar
+o Quality Gate e retornar falha se ele reprovar. O timeout é de 300 segundos.
 
-O Syft analisa a **imagem construída**, não apenas a pasta do projeto, e gera
-`sbom.spdx.json` em SPDX JSON com nomes, versões e relacionamentos dos
-componentes. O artifact `sbom-<sha>.spdx.json` é guardado por 90 dias, conforme
-o limite de retenção permitido no repositório. Baixe-o antes de expirar.
-O SBOM é produzido antes do gate Trivy da imagem, inclusive para a demonstração
-vulnerável, mas a imagem vulnerável nunca é publicada.
+O Trivy gera relatórios JSON completos, incluindo LOW, MEDIUM e achados sem
+correção. Em uma etapa separada, aplica `--severity HIGH,CRITICAL
+--ignore-unfixed --exit-code 1`. Assim, LOW/MEDIUM são registrados sem
+bloquear; HIGH/CRITICAL com correção disponível bloqueiam a execução.
 
-Todos os checks executam na abertura, reabertura e atualização de PRs para
-main. Não há filtros de caminho que dispensem verificações. Não se usa
-`pull_request_target`. PRs de forks não recebem SONAR_TOKEN e falham de forma
-segura; a demonstração deve usar uma branch no próprio repositório.
+O Syft gera o SBOM da imagem Docker em SPDX JSON, com componentes, versões e
+relacionamentos. O arquivo é publicado como artifact do GitHub Actions.
+Os relatórios também são preservados quando o Trivy reprova a execução.
 
-Somente um **push para main**, após sucesso do gate agregado, publica no GHCR
-(`ghcr.io/dono/repositorio:<sha>`). O job carrega a mesma imagem examinada,
-sem reconstruir depois do scan. PRs e execuções manuais não publicam.
-O usuário do container é `node`, sem privilégios de root.
+## Proteção e publicação
 
-## 5. Proteger main e demonstrar a CVE
+A `main` exige PR, branch atualizada e os seis checks obrigatórios, inclusive
+para administradores. A configuração está registrada em
+[protecao-main.json](docs/evidencias/protecao-main.json).
 
-Após uma execução inicial completa, substitua `DONO` pelo seu usuário:
+A imagem é construída e examinada antes da publicação. O job de publicação
+carrega a mesma imagem aprovada, sem reconstruí-la. Somente pushes para
+`main`, após aprovação de todos os checks, publicam no GHCR. PRs não publicam.
+A imagem final executa com usuário `node` e não inclui npm e Yarn, utilizados
+apenas na etapa de build.
 
-```powershell
-.\scripts\proteger-main.ps1 -Repositorio DONO/devsecops-simples
-```
+Imagem publicada na execução de referência:
+`ghcr.io/gustavohmfilho/devsecops-simples:f61bbda2b968238f0294f0fad1a3f26e3936ccf7`.
 
-O script exige PR, branch atualizada e os seis checks, também para
-administradores. Não exige aprovação de outra pessoa, para permitir o trabalho
-individual. Verifique em Settings > Branches se a regra foi aplicada.
-Se a API informar indisponibilidade do recurso no plano/repositório, guarde
-a mensagem e uma captura; o enunciado condiciona essa configuração à
-disponibilidade. Repositório público normalmente facilita essa configuração.
+## Demonstração da vulnerabilidade e correção
 
-**Primeiro, introduza a falha:**
+No [PR #1](https://github.com/GustavoHMFilho/devsecops-simples/pull/1), a versão cross-spawn 7.0.3 foi introduzida na branch
+de teste. O Trivy identificou a CVE-2024-21538, de severidade HIGH, uma
+vulnerabilidade de negação de serviço por expressão regular. O relatório
+informa correção disponível em 7.0.5/6.0.6. Os testes, Gitleaks e SonarCloud
+passaram enquanto o Trivy reprovou dependências e imagem, bloqueando o merge.
 
-```powershell
-.\scripts\demo.ps1 -Etapa vulneravel
-```
+No mesmo PR, cross-spawn foi atualizado para 7.0.6. Após a correção, todos os
+checks passaram e o PR foi integrado à `main`. A publicação ocorreu somente
+depois da nova verificação na branch principal.
 
-O script cria `demo/cve-2024-21538`, fixa `cross-spawn@7.0.3`, atualiza o
-lockfile e abre o PR. A CVE-2024-21538 é uma negação de serviço por expressão
-regular, classificada HIGH pelo GitHub Advisory Database, corrigida na série
-7 a partir de 7.0.5. A demonstração instala o pacote; não executa um ataque.
+O [PR #2](https://github.com/GustavoHMFilho/devsecops-simples/pull/2) reproduziu o bloqueio para registrar a captura da
+interface autenticada, com Trivy obrigatório reprovado e botão de merge
+desabilitado. Após a captura, esse PR foi fechado sem merge.
 
-**Pare e capture antes de corrigir:**
+## Evidências
 
-1. O job `Trivy dependencias` deve falhar por CVE-2024-21538, indicando
-   versão instalada 7.0.3 e versão corrigida no relatório.
-2. `Docker Trivy e SBOM` também deve apontar o pacote na imagem.
-3. Capture a área do PR mostrando o merge bloqueado pelos checks obrigatórios.
-   Check vermelho sozinho não comprova proteção de branch.
-4. Salve o link do PR, SHA do commit vulnerável, URL da execução e o JSON
-   `trivy-dependencies` da aba Artifacts.
+- [Execução reprovada pela CVE](https://github.com/GustavoHMFilho/devsecops-simples/actions/runs/40611844168)
+- [Execução aprovada após a correção](https://github.com/GustavoHMFilho/devsecops-simples/actions/runs/40612244995)
+- [Execução da main com publicação aprovada](https://github.com/GustavoHMFilho/devsecops-simples/actions/runs/40612509002)
+- [Projeto SonarCloud](https://sonarcloud.io/dashboard?id=GustavoHMFilho_devsecops-simples)
+- [Registro das evidências e arquivos](docs/EVIDENCIAS.md)
 
-**Depois, corrija no mesmo PR:**
+As verificações antecipam a identificação de problemas para a etapa de PR,
+aplicando shift-left security ao fluxo de integração e entrega contínuas.
 
-```powershell
-.\scripts\demo.ps1 -Etapa corrigir
-```
+## Referências
 
-O script atualiza para 7.0.6 e envia novo commit. Aguarde todos os checks,
-capture a aprovação e baixe o SBOM. Preserve a URL da execução que falhou,
-pois a visão atual do PR passará a mostrar apenas os checks mais recentes.
-Não faça merge antes da correção. Após aprovação, faça merge pela interface;
-o push da main executará os gates novamente antes de publicar a imagem.
-
-Novas CVEs podem surgir na imagem base ou em dependências. Se o pipeline
-ainda reprovar depois da correção demonstrada, examine o relatório e atualize
-os componentes afetados, sem reduzir severidades ou desativar gates.
-
-## 6. Entrega e pontuação
-
-Preencha [docs/EVIDENCIAS.md](docs/EVIDENCIAS.md) e anexe capturas reais.
-
-| Critério | Pontos | Evidência necessária |
-|---|---:|---|
-| Gitleaks | 15 | Job executado, comando e resultado |
-| SonarCloud e Quality Gate | 20 | Análise, gate de código novo e resultado |
-| Trivy e bloqueio | 20 | JSON e falha por HIGH/CRITICAL corrigível |
-| SBOM | 15 | Artifact real do Syft, baixado e inspecionado |
-| Bloqueio e correção | 20 | Mesmo PR: execução vermelha, bloqueio e execução verde |
-| Organização/documentação | 10 | Código, workflow, README e evidências |
-| **Total possível** | **100** | Depende da execução e avaliação do professor |
-
-Entregue: link do repositório, link do PR, links das duas execuções, capturas,
-JSON que identifica a CVE e SBOM publicado como artifact. A existência dos
-arquivos de configuração sozinha não atende ao requisito de evidências.
-
-## Referências oficiais
-
-- [GitHub Advisory: CVE-2024-21538](https://github.com/advisories/GHSA-3xgq-45jj-v275)
-- [Trivy: vulnerabilidades e severidades](https://trivy.dev/docs/dev/guide/scanner/vulnerability/)
+- [CVE-2024-21538 no GitHub Advisory Database](https://github.com/advisories/GHSA-3xgq-45jj-v275)
+- [Gitleaks](https://github.com/gitleaks/gitleaks)
 - [SonarCloud com GitHub Actions](https://docs.sonarsource.com/sonarqube-cloud/analyzing-source-code/ci-based-analysis/github-actions-for-sonarcloud/)
+- [Trivy](https://trivy.dev/docs/dev/guide/scanner/vulnerability/)
 - [Syft no GitHub Actions](https://github.com/anchore/sbom-action)
-- [Gitleaks CLI](https://github.com/gitleaks/gitleaks)
-
