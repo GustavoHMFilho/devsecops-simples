@@ -1,0 +1,191 @@
+name: DevSecOps
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: devsecops-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: Build e testes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run build
+      - run: npm test
+      - uses: actions/upload-artifact@v6
+        with:
+          name: coverage
+          path: lcov.info
+          if-no-files-found: error
+
+  gitleaks:
+    name: Gitleaks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - run: mkdir -p reports
+      - name: Examinar todo o historico, com segredos ocultados
+        run: >-
+          docker run --rm -v "$PWD:/repo" -w /repo
+          -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0=/repo
+          ghcr.io/gitleaks/gitleaks:v8.24.2 git /repo
+          --log-opts="--all" --redact --exit-code=1
+          --report-format=json --report-path=/repo/reports/gitleaks.json
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: gitleaks-report
+          path: reports/gitleaks.json
+          if-no-files-found: error
+
+  sonar:
+    name: SonarCloud Quality Gate
+    needs: tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@v6
+        with:
+          name: coverage
+      - name: Validar configuracao obrigatoria
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_ORGANIZATION: ${{ vars.SONAR_ORGANIZATION }}
+          SONAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY }}
+        run: |
+          test -n "$SONAR_TOKEN" || { echo 'Configure o secret SONAR_TOKEN'; exit 1; }
+          test -n "$SONAR_ORGANIZATION" || { echo 'Configure SONAR_ORGANIZATION'; exit 1; }
+          test -n "$SONAR_PROJECT_KEY" || { echo 'Configure SONAR_PROJECT_KEY'; exit 1; }
+      - uses: SonarSource/sonarqube-scan-action@v8
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >-
+            -Dsonar.organization=${{ vars.SONAR_ORGANIZATION }}
+            -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY }}
+
+  dependencies:
+    name: Trivy dependencias
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: aquasecurity/setup-trivy@v0.2.0
+        with:
+          version: v0.76.1
+          cache: true
+      - run: mkdir -p reports
+      - name: Relatorio completo, incluindo LOW e MEDIUM
+        run: trivy fs --scanners vuln --severity UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL --format json --output reports/dependencies.json --exit-code 0 .
+      - name: Bloquear HIGH e CRITICAL com correcao
+        run: trivy fs --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 .
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: trivy-dependencies
+          path: reports/dependencies.json
+          if-no-files-found: error
+
+  image:
+    name: Docker Trivy e SBOM
+    needs: tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Construir sem publicar
+        run: docker build --pull -t devsecops:${{ github.sha }} .
+      - name: Syft - SBOM da imagem construida
+        uses: anchore/sbom-action@v0
+        with:
+          image: devsecops:${{ github.sha }}
+          format: spdx-json
+          output-file: sbom.spdx.json
+          artifact-name: sbom-${{ github.sha }}.spdx.json
+          upload-release-assets: false
+          upload-artifact-retention: 90
+      - uses: aquasecurity/setup-trivy@v0.2.0
+        with:
+          version: v0.76.1
+          cache: true
+      - run: mkdir -p reports
+      - name: Relatorio completo da imagem
+        run: trivy image --scanners vuln --severity UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL --format json --output reports/image.json --exit-code 0 devsecops:${{ github.sha }}
+      - name: Bloquear imagem vulneravel
+        run: trivy image --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 devsecops:${{ github.sha }}
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: trivy-image
+          path: reports/image.json
+          if-no-files-found: error
+      - name: Guardar exatamente a imagem aprovada
+        run: docker save devsecops:${{ github.sha }} -o image.tar
+      - uses: actions/upload-artifact@v6
+        with:
+          name: docker-image
+          path: image.tar
+          retention-days: 2
+          if-no-files-found: error
+
+  gate:
+    name: Seguranca obrigatoria
+    if: always()
+    needs: [tests, gitleaks, sonar, dependencies, image]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Exigir sucesso de todos os checks, inclusive os que foram pulados
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$RESULTS" | jq .
+          echo "$RESULTS" | jq -e 'all(.[]; .result == "success")'
+
+  publish:
+    name: Publicar imagem aprovada
+    needs: gate
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    steps:
+      - uses: actions/download-artifact@v6
+        with:
+          name: docker-image
+      - name: Publicar no GHCR a mesma imagem examinada
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_ACTOR: ${{ github.actor }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          IMAGE="ghcr.io/${REPOSITORY,,}"
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GH_ACTOR" --password-stdin
+          docker load -i image.tar
+          docker tag devsecops:${{ github.sha }} "$IMAGE:${{ github.sha }}"
+          docker push "$IMAGE:${{ github.sha }}"

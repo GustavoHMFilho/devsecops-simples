@@ -1,0 +1,7 @@
+node_modules/
+lcov.info
+coverage/
+reports/
+.scannerwork/
+.env
+*.tar
