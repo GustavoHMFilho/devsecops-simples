@@ -12,6 +12,6 @@
     "build": "node --check src/app.js && node --check src/server.js"
   },
   "dependencies": {
-    "cross-spawn": "7.0.6"
+    "cross-spawn": "7.0.3"
   }
 }
